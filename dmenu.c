@@ -26,7 +26,7 @@
 #define TEXTW(X)              (drw_fontset_getwidth(drw, (X)) + lrpad)
 
 /* enums */
-enum { SchemeNorm, SchemeSel, SchemeOut, SchemeLast }; /* color schemes */
+enum { SchemeNorm, SchemeSel, SchemeOut, SchemeBord, SchemeLast }; /* color schemes */
 
 struct item {
 	char *text;
@@ -47,7 +47,7 @@ static struct item *items = NULL;
 static struct item *matches, *matchend;
 static struct item *prev, *curr, *next, *sel;
 static int mon = -1, screen;
-static int gap = 10;
+static int gap;
 
 static Atom clip, utf8;
 static Display *dpy;
@@ -144,7 +144,7 @@ drawmenu(void)
 {
 	unsigned int curpos;
 	struct item *item;
-	int x = 0, y = 2*gap, fh = drw->fonts->h, w;
+	int x = 0, y = gap, fh = drw->fonts->h, w;
 
 	drw_setscheme(drw, scheme[SchemeNorm]);
 	drw_rect(drw, 0, 0, mw, mh, 1, 1);
@@ -155,18 +155,22 @@ drawmenu(void)
 	/* draw input field */
 	w = (lines > 0 || !matches) ? mw - x : inputw;
 	drw_setscheme(drw, scheme[SchemeNorm]);
-	drw_text(drw, 2*gap, y, w, bh, lrpad / 2, text, 0);
+	drw_text(drw, gap, y, w - 2*gap, bh, lrpad / 2, text, 0);
 
 	curpos = TEXTW(text) + gap - TEXTW(&text[cursor]);
 	if ((curpos += lrpad / 2 - 1) < w) {
 		drw_setscheme(drw, scheme[SchemeNorm]);
-		drw_rect(drw, x + gap + curpos, 2 + 2*gap + (bh-fh)/2, 2, fh - 4, 1, 0);
+		drw_rect(drw, x + curpos, 2 + gap + (bh-fh)/2, 2, fh - 4, 1, 0);
 	}
 
 	if (lines > 0) {
 		/* draw vertical list */
 		for (item = curr; item != next; item = item->right)
-			drawitem(item, x + 2*gap, y += bh, mw - 2*gap - x);
+			drawitem(item, x + gap, y += bh, mw - (2*gap + x));
+		drw_setscheme(drw, scheme[SchemeSel]);
+		drw_rect(drw, gap, gap, mw - 2*gap, mh - 2*gap, 0, 1);
+		//XSetForeground(drw->dpy, drw->gc, drw->scheme[ColFg].pixel);
+		//XDrawRectangle(drw->dpy, drw->drawable, drw->gc, gap, gap, mw - 2*gap, mh - 2*gap);
 	} else if (matches) {
 		/* draw horizontal list */
 		x += inputw;
@@ -184,8 +188,6 @@ drawmenu(void)
 			drw_text(drw, mw - w, 0, w, bh, lrpad / 2, ">", 0);
 		}
 	}
-	//XSetForeground(drw->dpy, drw->gc, drw->scheme[ColFg].pixel);
-	//XDrawRectangle(drw->dpy, drw->drawable, drw->gc, gap, gap, mw - gap, mh - 2*gap);
 	drw_map(drw, win, 0, 0, mw + 2*gap, mh + 2*gap);
 }
 
@@ -572,7 +574,7 @@ run(void)
 		switch(ev.type) {
 		case Expose:
 			if (ev.xexpose.count == 0)
-				drw_map(drw, win, 0, 0, mw + 2*gap, mh + 2*gap);
+				drw_map(drw, win, 0, 0, mw, mh);
 			break;
 		case FocusIn:
 			/* regrab focus from parent window */
@@ -620,7 +622,10 @@ setup(void)
 	bh = drw->fonts->h + 2;
 	bh = MAX(bh,lineheight);	/* make a menu line AT LEAST 'lineheight' tall */
 	lines = MAX(lines, 0);
-	mh = 4*gap + (lines + 1) * bh;
+	if (centered)
+		mh = 2*gap + (lines + 1) * bh;
+	else
+		mh = (lines + 1) * bh;
 	promptw = (prompt && *prompt) ? TEXTW(prompt) - lrpad / 4 : 0;
 #ifdef XINERAMA
 	i = 0;
@@ -669,9 +674,9 @@ setup(void)
 			    parentwin);
 		if (centered) {
 			if (dmw != 0) {
-				mw = MIN(MAX(max_textw() + promptw, min_width), wa.width);
+				mw = 2*gap + MIN(MAX(max_textw() + promptw, min_width), wa.width);
 			} else {
-				mw = (dmw>0 ? dmw : wa.width);
+				mw = 2*gap + (dmw>0 ? dmw : wa.width);
 			}
 			x = (wa.width  - mw) / 2;
 			y = (wa.height - mh) / 2;
@@ -688,7 +693,7 @@ setup(void)
 	swa.override_redirect = True;
 	swa.background_pixel = scheme[SchemeNorm][ColBg].pixel;
 	swa.event_mask = ExposureMask | KeyPressMask | VisibilityChangeMask;
-	win = XCreateWindow(dpy, parentwin, x, y, mw + 2*gap, mh, border_width,
+	win = XCreateWindow(dpy, parentwin, x, y, mw, mh, border_width,
 	                    CopyFromParent, CopyFromParent, CopyFromParent,
 	                    CWOverrideRedirect | CWBackPixel | CWEventMask, &swa);
 	if (border_width)
@@ -747,9 +752,10 @@ main(int argc, char *argv[])
 		} else if (i + 1 == argc)
 			usage();
 		/* these options take one argument */
-		else if (!strcmp(argv[i], "-l"))   /* number of lines in vertical list */
+		else if (!strcmp(argv[i], "-l")) {   /* number of lines in vertical list */
 			lines = atoi(argv[++i]);
-		else if (!strcmp(argv[i], "-x"))   /* window x offset */
+			gap = ogap;
+		} else if (!strcmp(argv[i], "-x"))   /* window x offset */
 			dmx = atoi(argv[++i]);
 		else if (!strcmp(argv[i], "-y"))   /* window y offset (from bottom up if -b) */
 			dmy = atoi(argv[++i]);
@@ -793,7 +799,7 @@ main(int argc, char *argv[])
 	if (!XGetWindowAttributes(dpy, parentwin, &wa))
 		die("could not get embedding window attributes: 0x%lx",
 		    parentwin);
-	drw = drw_create(dpy, screen, root, wa.width, wa.height);
+	drw = drw_create(dpy, screen, root, wa.width, wa.height, border);
 	if (!drw_fontset_create(drw, fonts, LENGTH(fonts)))
 		die("no fonts could be loaded.");
 	lrpad = drw->fonts->h;
